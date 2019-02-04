@@ -14,7 +14,7 @@ with open('README.rst', 'w', encoding='utf-8') as readme:
 setup(
     name='glue-setuptools',
 
-    version='0.2',
+    version='0.3',
 
     description='A Command extension to setuptools that allows building an AWS Glue dist and uploading to S3',
     long_description=pypandoc.convert_file('README.md', 'rst', format='markdown'),
@@ -47,6 +47,9 @@ setup(
         'distutils.commands': [
             'gdist = glue_setuptools.gdist:GDist',
             'gupload = glue_setuptools.gupload:GUpload',
+        ],
+        'distutils.setup_keywords': [
+            'glue_entrypoint = glue_setuptools.gdist:validate_glue_entrypoint',
         ],
     }
 )

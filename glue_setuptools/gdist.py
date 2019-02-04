@@ -10,24 +10,9 @@ from setuptools import Command
 from subprocess import Popen, PIPE
 
 
-def validate_lambda_function(dist, attr, value):
+def validate_glue_entrypoint(dist, attr, value):
     if not re.compile('^([a-zA-Z0-9_]+\.)*[a-zA-Z0-9_]+:[a-zA-Z0-9_]+$').match(value):
         raise DistutilsSetupError('{} must be in the form of \'my_package.some_module:some_function\''.format(attr))
-
-
-def add_lambda_module_to_py_modules(dist, attr, value):
-    py_modules = getattr(dist, 'py_modules', None)
-    if not py_modules:
-        py_modules = []
-    py_modules.append(value)
-    setattr(dist, 'py_modules', py_modules)
-
-
-def validate_lambda_package(dist, attr, value):
-    if not os.path.exists(value) or not os.path.isdir(value):
-        raise DistutilsSetupError('lambda_package either doesn\'t exist or is not a directory')
-    if os.path.exists(os.path.join(value, '__init__.py')):
-        raise DistutilsSetupError('{} {} cannot contain an __init__.py'.format(attr, value))
 
 
 class GDist(Command):
@@ -71,28 +56,47 @@ class GDist(Command):
         # (or bdist, or bdist_wheel, depending on how the user called setup.py
         self._install_dist_package()
 
+        # Create Glue Job entry point function
+        self._create_glue_entrypoint()
+
         # Now build the glue package
         self._build_glue_package()
 
     def _build_glue_package(self):
         dist_name = '{}-glue-{}.zip'.format(self.distribution.get_name(), self.distribution.get_version()) \
             if getattr(self, 'include_version') \
-            else '{}.zip'.format(self.distribution.get_name())
+            else '{}-glue.zip'.format(self.distribution.get_name())
         dist_path = os.path.join(self._dist_dir, dist_name)
+
+        script_name = '{}-{}-script.py'.format(self.distribution.get_name(), self.distribution.get_version()) \
+            if getattr(self, 'include_version') \
+            else '{}-script.py'.format(self.distribution.get_name())
+        script_path = os.path.join(self._dist_dir, script_name)
+
         if os.path.exists(dist_path):
             os.remove(dist_path)
+        if os.path.exists(script_path):
+            os.remove(script_path)
+
         log.info('creating {}'.format(dist_path))
         with zipfile.ZipFile(dist_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             abs_src = os.path.abspath(self._glue_build_dir)
             for root, _, files in os.walk(self._glue_build_dir):
                 for filename in files:
+                    if root == self._glue_build_dir and filename == 'entrypoint.py':
+                        continue
                     absname = os.path.abspath(os.path.join(root, filename))
                     arcname = absname[len(abs_src) + 1:]
                     log.debug('zipping {} as {}'.format(os.path.join(root, filename), arcname))
                     zf.write(absname, arcname)
         # Set the resulting distribution file path for downstream command use
-        setattr(self, 'dist_name', dist_name)
-        setattr(self, 'dist_path', dist_path)
+        setattr(self, 'gdist_name', dist_name)
+        setattr(self, 'gdist_path', dist_path)
+
+        log.info('copying {}'.format(script_path))
+        shutil.copy(os.path.join(self._glue_build_dir, "entrypoint.py"), script_path)
+        setattr(self, 'gdist_script_name', script_name)
+        setattr(self, 'gdist_script_path', script_path)
 
     def _install_dist_package(self):
         # Get the name of the package that we just built
@@ -123,3 +127,22 @@ class GDist(Command):
 
         if pip.returncode is not 0:
             raise DistutilsPlatformError('pip returned unsuccessfully')
+
+    def _create_glue_entrypoint(self):
+        glue_entrypoint = getattr(self.distribution, 'glue_entrypoint', None)
+        if not glue_entrypoint:
+            return
+        components = glue_entrypoint.split(':')
+        module = components[0]
+        function = components[1]
+        function_lines = [
+            'import {}\n'.format(module),
+            '\n',
+            '\n',
+            '{}.{}()\n'.format(module, function)
+        ]
+        function_path = os.path.join(self._glue_build_dir, 'entrypoint.py')
+        log.info('creating {}'.format(function_path))
+        with open(function_path, 'w') as py:
+            py.writelines(function_lines)
+

@@ -40,11 +40,14 @@ class GUpload(Command):
         """Run command."""
         self.run_command('gdist')
         gdist_cmd = self.get_finalized_command('gdist')
-        dist_path = getattr(gdist_cmd, 'dist_path')
-        dist_name = getattr(gdist_cmd, 'dist_name')
+        dist_path = getattr(gdist_cmd, 'gdist_path')
+        dist_name = getattr(gdist_cmd, 'gdist_name')
+        script_name = getattr(gdist_cmd, 'gdist_script_name')
+        script_path = getattr(gdist_cmd, 'gdist_script_path')
         if dist_path is None or dist_name is None:
             raise DistutilsArgError('\'gdist\' missing attributes')
         dist_name = getattr(self, 's3_prefix') + dist_name
+        script_name = getattr(self, 's3_prefix') + script_name
         if len(getattr(self, 'endpoint_url')):
             s3 = boto3.client(
                 's3',
@@ -66,25 +69,26 @@ class GUpload(Command):
             getattr(self, 'endpoint_url') if len(getattr(self, 'endpoint_url')) else 'default endpoint',
             getattr(self, 'kms_key_id')
         ))
-        with open(dist_path, 'rb') as dist:
-            if getattr(self, 'kms_key_id'):
-                response = s3.put_object(
-                    Body=dist,
-                    Bucket=getattr(self, 's3_bucket'),
-                    Key=dist_name,
-                    ServerSideEncryption='aws:kms',
-                    SSEKMSKeyId=getattr(self, 'kms_key_id')
-                )
-            else:
-                response = s3.put_object(
-                    Body=dist,
-                    Bucket=getattr(self, 's3_bucket'),
-                    Key=dist_name,
-                    ServerSideEncryption='AES256'
+        for (file,fname) in [(dist_path,dist_name), (script_path,script_name)]:
+            with open(file, 'rb') as dist:
+                if getattr(self, 'kms_key_id'):
+                    response = s3.put_object(
+                        Body=dist,
+                        Bucket=getattr(self, 's3_bucket'),
+                        Key=fname,
+                        ServerSideEncryption='aws:kms',
+                        SSEKMSKeyId=getattr(self, 'kms_key_id')
+                    )
+                else:
+                    response = s3.put_object(
+                        Body=dist,
+                        Bucket=getattr(self, 's3_bucket'),
+                        Key=fname,
+                        ServerSideEncryption='AES256'
+                    )
+                log.info('upload complete {}:\n{}'.format(fname,
+                    json.dumps(response, sort_keys=True, indent=4, separators=(',', ': ')))
                 )
         setattr(self, 's3_object_key', dist_name)
-        setattr(self, 's3_object_version', response['VersionId'] if "VersionId" in response else None)
-        log.info('upload complete:\n{}'.format(
-            json.dumps(response, sort_keys=True, indent=4, separators=(',', ': ')))
-        )
+        setattr(self, 's3_object_key_script', script_name)
 
