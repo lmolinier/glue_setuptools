@@ -98,6 +98,19 @@ class GDist(Command):
         setattr(self, 'gdist_script_name', script_name)
         setattr(self, 'gdist_script_path', script_path)
 
+    def _run_pip(self, args):
+        retcode = 0
+
+        try:
+            import pip
+            retcode = pip.main(args)
+        except AttributeError:
+            import pip._internal
+            retcode = pip._internal.main(args)
+
+        if retcode is not 0:
+            raise DistutilsPlatformError('pip returned unsuccessfully')
+
     def _install_dist_package(self):
         # Get the name of the package that we just built
         package_name = self.distribution.get_name()
@@ -117,16 +130,8 @@ class GDist(Command):
         log.info('installing package {} from {} into {}'.format(package_name,
                                                                 self._dist_dir,
                                                                 self._glue_build_dir))
-        pip = Popen(['pip', 'install',
-                     '-f', self._dist_dir,
-                     '-t', self._glue_build_dir, package_name],
-                    stdout=PIPE, stderr=PIPE)
-        stdout, stderr = pip.communicate()
-        log.debug("pip stdout: {}".format(stdout))
-        log.debug("pip stderr: {}".format(stderr))
 
-        if pip.returncode is not 0:
-            raise DistutilsPlatformError('pip returned unsuccessfully')
+        self._run_pip(['install', '-f', self._dist_dir, '-t', self._glue_build_dir, package_name])
 
     def _create_glue_entrypoint(self):
         glue_entrypoint = getattr(self.distribution, 'glue_entrypoint', None)
